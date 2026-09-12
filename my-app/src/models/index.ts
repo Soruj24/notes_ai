@@ -40,3 +40,8 @@ export {
 } from "./activity-log.model";
 export { Template, type TemplateDoc, type TemplateDocument } from "./template.model";
 export { Embedding, type EmbeddingDoc, type EmbeddingDocument } from "./embedding.model";
+export {
+  TaskDependency,
+  type TaskDependencyDoc,
+  type TaskDependencyDocument,
+} from "./task-dependency.model";

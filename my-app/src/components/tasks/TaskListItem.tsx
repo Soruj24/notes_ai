@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { CalendarDays, Repeat } from "lucide-react";
 import { Badge } from "@/src/components/ui/badge";
 import { useToast } from "@/src/components/ui/toast";
@@ -12,6 +12,8 @@ import {
   type TaskDTO,
 } from "@/src/components/tasks/types";
 import { useCompleteTaskMutation, useReopenTaskMutation } from "@/src/store/tasksApi";
+import { useGetDependencyGraphQuery } from "@/src/store/dependencyGraphApi";
+import { getTaskIntelligenceState, intelligenceTone } from "@/src/lib/tasks/intelligence";
 import { cx } from "@/src/lib/utils/cx";
 
 const priorityTone: Record<string, "neutral" | "accent" | "warning" | "danger"> = {
@@ -33,15 +35,26 @@ interface TaskListItemProps {
   task: TaskDTO;
 }
 
-/** Task row with instant local checkbox + RTK mutation behind it. */
+/** Task row with instant local checkbox + RTK mutation behind it + blocked intelligence. */
 export function TaskListItem({ wid, task }: TaskListItemProps) {
   const { toast } = useToast();
   const [completeTask] = useCompleteTaskMutation();
   const [reopenTask] = useReopenTaskMutation();
+  const { data: graph } = useGetDependencyGraphQuery({ workspaceId: wid });
   // Local mirror for instant feedback; server is source of truth on refetch.
   const [done, setDone] = useState(task.status === "done");
   const overdue = !done && isOverdue(task);
   const progress = subtaskProgress(task);
+
+  // Real dependency data — never mock
+  const blocked = useMemo(() => !!graph?.blocked[task.id], [graph, task.id]);
+  const blockedByIds: string[] = useMemo(() => graph?.blockedDetails[task.id] ?? [], [graph, task.id]);
+  const blockedByNames = useMemo(() => {
+    if (!graph) return [] as Array<{ id: string; title: string }>;
+    const map = new Map(graph.nodes.map((n) => [n.id, n.title]));
+    return blockedByIds.map((id) => ({ id, title: map.get(id) ?? id.slice(0, 8) }));
+  }, [graph, blockedByIds]);
+  const intelligence = getTaskIntelligenceState(task, blocked);
 
   async function onToggle() {
     const next = !done;
@@ -97,6 +110,7 @@ export function TaskListItem({ wid, task }: TaskListItemProps) {
             <span className="min-w-0 truncate">{task.title}</span>
           </p>
           <span className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+            <Badge size="sm" tone={intelligenceTone(intelligence)}>{intelligence}</Badge>
             <span
               className={cx(
                 "inline-flex items-center gap-1 tabular-nums",
@@ -129,6 +143,23 @@ export function TaskListItem({ wid, task }: TaskListItemProps) {
               </span>
             ) : null}
           </span>
+          {blocked && blockedByNames.length > 0 ? (
+            <div className="mt-2 flex flex-wrap items-center gap-1 text-xs text-zinc-500 dark:text-zinc-400">
+              <span className="font-medium">Blocked by:</span>
+              {blockedByNames.map((b, i) => (
+                <span key={b.id} className="inline-flex items-center gap-1">
+                  {i > 0 ? <span>·</span> : null}
+                  <Link
+                    href={`/dependencies?focus=${b.id}`}
+                    className="rounded px-1 py-0.5 font-medium text-indigo-600 underline decoration-indigo-300 underline-offset-2 hover:bg-indigo-50 dark:text-indigo-400 dark:decoration-indigo-700"
+                    title={`Focus ${b.title} in graph`}
+                  >
+                    {b.title}
+                  </Link>
+                </span>
+              ))}
+            </div>
+          ) : null}
         </Link>
       </div>
     </li>

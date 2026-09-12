@@ -86,6 +86,9 @@ export type ActivityEntity = (typeof ACTIVITY_ENTITIES)[number];
 export const TEMPLATE_KINDS = ["note", "task", "project", "plan"] as const;
 export type TemplateKind = (typeof TEMPLATE_KINDS)[number];
 
+export const TASK_DEPENDENCY_TYPES = ["blocks", "blocked_by", "related"] as const;
+export type TaskDependencyType = (typeof TASK_DEPENDENCY_TYPES)[number];
+
 /** Roles allowed to mutate documents they do not own. */
 export const ELEVATED_ROLES: readonly MemberRole[] = ["owner", "admin"];
 

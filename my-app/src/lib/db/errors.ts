@@ -26,11 +26,23 @@ export class ValidationError extends Error {
   }
 }
 
+export class CircularDependencyError extends Error {
+  readonly status = 400;
+  readonly code = "CIRCULAR_DEPENDENCY";
+  readonly cycle: string[];
+
+  constructor(cycle: string[], message?: string) {
+    super(message ?? `Circular dependency detected: ${cycle.join(" → ")}`);
+    this.cycle = cycle;
+  }
+}
+
 export type DbError =
   | NotFoundError
   | ForbiddenError
   | ConflictError
-  | ValidationError;
+  | ValidationError
+  | CircularDependencyError;
 
 export function isUniqueViolation(err: unknown): boolean {
   return (
@@ -44,8 +56,13 @@ export function isUniqueViolation(err: unknown): boolean {
 /** Map any thrown value to an HTTP status + field-error payload. */
 export function toHttpError(err: unknown): {
   status: number;
-  body: { error?: string; errors?: Record<string, string[]> };
+  body: { error?: string; errors?: Record<string, string[]>; code?: string; message?: string; cycle?: string[] };
 } {
+  if (err instanceof CircularDependencyError)
+    return {
+      status: err.status,
+      body: { code: err.code, message: err.message, cycle: err.cycle, error: err.message },
+    };
   if (err instanceof ValidationError)
     return { status: 400, body: { errors: err.fields } };
   if (err instanceof NotFoundError)

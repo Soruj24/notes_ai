@@ -42,6 +42,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { href: "/schedule", label: "Schedule" },
       { href: "/projects", label: "Projects", flag: "projects" },
       { href: "/goals", label: "Goals", flag: "goals" },
+      { href: "/dependencies", label: "Dependencies", flag: "tasks" },
       { href: "/reminders", label: "Reminders" },
       { href: "/templates", label: "Templates", flag: "templates" },
     ],

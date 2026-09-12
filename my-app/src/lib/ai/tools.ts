@@ -52,6 +52,7 @@ export const TOOL_NAMES = [
   "get_daily_schedule",
   "plan_day",
   "plan_week",
+  "analyze_project_dependencies",
 ] as const;
 
 export type ToolName = (typeof TOOL_NAMES)[number];
@@ -620,6 +621,29 @@ export function makeTools(ctx: ToolContext, opts: { allowlist?: readonly string[
     },
   );
 
+  const analyze_project_dependencies = tool(
+    async ({ projectId }) => {
+      const { suggestProjectDependencies } = await import("@/src/services/dependency-suggestion.service");
+      const suggestions = await suggestProjectDependencies({ userId, workspaceId: wid, projectId });
+      // Never auto-modify DB — return structured suggestions only
+      return JSON.stringify({
+        suggestions: suggestions.map((s) => ({
+          sourceTaskId: s.sourceTaskId,
+          targetTaskId: s.targetTaskId,
+          reason: s.reason,
+          confidence: s.confidence,
+        })),
+        note: "Suggestions require explicit user Accept — not yet saved.",
+      });
+    },
+    {
+      name: "analyze_project_dependencies",
+      description:
+        'Analyze project dependencies: inspect tasks, projects, goals, existing dependencies, descriptions, dates, durations and suggest missing dependencies. Example: "Build Product UI" may depend on "Build Product API". Returns {sourceTaskId,targetTaskId,reason,confidence} without modifying DB.',
+      schema: z.object({ projectId: z.string().optional().describe("Project to analyze; omit for workspace-wide") }),
+    },
+  );
+
   const all = [
     create_note, update_note, search_notes,
     create_task, update_task, complete_task, list_tasks,
@@ -630,6 +654,7 @@ export function makeTools(ctx: ToolContext, opts: { allowlist?: readonly string[
     search_content, semantic_search,
     get_daily_schedule, get_productivity_stats,
     plan_day, plan_week,
+    analyze_project_dependencies,
     // Extras beyond the core set:
     reopen_task, list_events, list_projects,
   ];

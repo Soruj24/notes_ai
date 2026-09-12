@@ -16,6 +16,8 @@ export const DOMAIN_EVENTS = [
   "task.updated",
   "task.completed",
   "task.deleted",
+  "task.dependency.added",
+  "task.dependency.removed",
   "event.created",
   "event.updated",
   "event.deleted",

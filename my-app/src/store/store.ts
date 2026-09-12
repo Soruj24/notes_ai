@@ -1,6 +1,7 @@
 import { configureStore } from "@reduxjs/toolkit";
 import { analyticsApi } from "@/src/store/analyticsApi";
 import { dashboardApi } from "@/src/store/dashboardApi";
+import { dependencyGraphApi } from "@/src/store/dependencyGraphApi";
 import { notesApi } from "@/src/store/notesApi";
 import { notificationsApi } from "@/src/store/notificationsApi";
 import { remindersApi } from "@/src/store/remindersApi";
@@ -19,6 +20,7 @@ export function makeStore() {
       [notificationsApi.reducerPath]: notificationsApi.reducer,
       [remindersApi.reducerPath]: remindersApi.reducer,
       [analyticsApi.reducerPath]: analyticsApi.reducer,
+      [dependencyGraphApi.reducerPath]: dependencyGraphApi.reducer,
       tasksUi: tasksUiReducer,
     },
     middleware: (getDefault) =>
@@ -30,6 +32,7 @@ export function makeStore() {
         notificationsApi.middleware,
         remindersApi.middleware,
         analyticsApi.middleware,
+        dependencyGraphApi.middleware,
       ),
   });
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { BlockedTasks } from "@/src/components/dashboard/BlockedTasks";
 import { GoalsProgress } from "@/src/components/dashboard/GoalsProgress";
 import { GreetingHeader } from "@/src/components/dashboard/GreetingHeader";
 import { InsightsPanel } from "@/src/components/dashboard/InsightsPanel";
@@ -30,6 +31,7 @@ export function DashboardPage({ wid, userName }: DashboardPageProps) {
         <div className="grid min-w-0 gap-4 sm:gap-5 lg:col-span-7 xl:col-span-8">
           <QuickCapture wid={wid} />
           <TodayTasks wid={wid} />
+          <BlockedTasks wid={wid} />
           <TodayTimeline wid={wid} />
           <RecentNotes wid={wid} />
         </div>
