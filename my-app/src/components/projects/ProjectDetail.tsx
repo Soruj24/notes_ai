@@ -9,12 +9,15 @@ import { isOverdueDue, type LinkOption, type ProjectDTO } from "@/src/components
 import { excerpt, type NoteDTO } from "@/src/components/notes/types";
 import { TaskList } from "@/src/components/tasks/TaskList";
 import { TaskQuickAdd } from "@/src/components/tasks/TaskQuickAdd";
+import { ProjectDependenciesTab } from "@/src/components/projects/ProjectDependenciesTab";
 import { Badge, type BadgeTone } from "@/src/components/ui/badge";
 import { Button } from "@/src/components/ui/button";
 import { Dialog } from "@/src/components/ui/dialog";
 import { ProgressRing } from "@/src/components/ui/progress";
+import { Tabs } from "@/src/components/ui/tabs";
 import { useToast } from "@/src/components/ui/toast";
 import { cx } from "@/src/lib/utils/cx";
+import { useListEventsQuery } from "@/src/store/scheduleApi";
 
 interface ProjectDetailProps {
   wid: string;
@@ -180,58 +183,84 @@ export function ProjectDetail({ wid, project, notes, goals }: ProjectDetailProps
         </div>
       </section>
 
-      <div className="grid items-start gap-4 sm:gap-5 lg:grid-cols-2">
-        <section
-          aria-label="Project tasks"
-          className="grid min-w-0 gap-3 rounded-2xl border border-zinc-200/90 bg-white p-5 shadow-[0_1px_2px_rgb(0_0_0/0.05)] sm:p-6 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-none"
-        >
-          <div className="flex items-center gap-2">
-            <h2 className="text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">Tasks</h2>
-            <span className="rounded-full bg-zinc-900/[0.06] px-2 py-0.5 text-[11px] font-semibold text-zinc-600 tabular-nums dark:bg-white/[0.08] dark:text-zinc-300">
-              {project.progress.total}
-            </span>
-          </div>
-          <TaskQuickAdd wid={wid} />
-          {project.progress.total === 0 ? (
-            <p className="rounded-lg bg-zinc-50 px-3 py-2.5 text-[13px] text-zinc-500 dark:bg-zinc-900/60 dark:text-zinc-400">
-              No tasks yet — add the first one above to start tracking progress.
-            </p>
-          ) : (
-            <TaskList wid={wid} view="all" projectId={project.id} hideEmpty />
-          )}
-        </section>
-
-        <section
-          aria-label="Project notes"
-          className="grid min-w-0 gap-3 rounded-2xl border border-zinc-200/90 bg-white p-5 shadow-[0_1px_2px_rgb(0_0_0/0.05)] sm:p-6 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-none"
-        >
-          <div className="flex items-center gap-2">
-            <h2 className="text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">Notes</h2>
-            <span className="rounded-full bg-zinc-900/[0.06] px-2 py-0.5 text-[11px] font-semibold text-zinc-600 tabular-nums dark:bg-white/[0.08] dark:text-zinc-300">
-              {notes.length}
-            </span>
-          </div>
-          {notes.length === 0 ? (
-            <p className="rounded-lg bg-zinc-50 px-3 py-2.5 text-[13px] leading-5 text-zinc-500 dark:bg-zinc-900/60 dark:text-zinc-400">
-              No notes linked yet — set this project on any note to collect research here.
-            </p>
-          ) : (
-            <ul className="grid gap-1.5">
-              {notes.slice(0, 8).map((note) => (
-                <li key={note.id}>
-                  <Link
-                    href={`/notes/${note.id}`}
-                    className="block rounded-lg border border-zinc-200/80 px-3 py-2 transition-[border-color,background-color] hover:border-zinc-300 hover:bg-zinc-50/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 dark:border-zinc-800/80 dark:hover:border-zinc-700 dark:hover:bg-zinc-900/60"
-                  >
-                    <p className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">{note.title || "Untitled"}</p>
-                    <p className="mt-0.5 truncate text-xs text-zinc-500 dark:text-zinc-400">{excerpt(note.body, 80)}</p>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      </div>
+      <Tabs
+        tabs={[
+          {
+            id: "overview",
+            label: "Overview",
+            content: (
+              <div className="grid gap-3 text-sm text-zinc-600 dark:text-zinc-400">
+                <p>
+                  {project.description || "No description."} {goalLabel ? `Goal: ${goalLabel}` : ""}
+                </p>
+                <div className="flex gap-2 text-xs">
+                  <span>Status: {project.status}</span>
+                  {project.dueAt ? <span>Due {new Date(project.dueAt).toLocaleDateString()}</span> : null}
+                </div>
+              </div>
+            ),
+          },
+          {
+            id: "tasks",
+            label: `Tasks · ${project.progress.total}`,
+            content: (
+              <div className="grid gap-3">
+                <TaskQuickAdd wid={wid} />
+                {project.progress.total === 0 ? (
+                  <p className="rounded-lg bg-zinc-50 px-3 py-2.5 text-[13px] text-zinc-500 dark:bg-zinc-900/60">
+                    No tasks yet — add the first one above.
+                  </p>
+                ) : (
+                  <TaskList wid={wid} view="all" projectId={project.id} hideEmpty />
+                )}
+              </div>
+            ),
+          },
+          {
+            id: "notes",
+            label: `Notes · ${notes.length}`,
+            content: notes.length === 0 ? (
+              <p className="rounded-lg bg-zinc-50 px-3 py-2.5 text-[13px] text-zinc-500 dark:bg-zinc-900/60">No notes linked yet.</p>
+            ) : (
+              <ul className="grid gap-1.5">
+                {notes.slice(0, 8).map((note) => (
+                  <li key={note.id}>
+                    <Link href={`/notes/${note.id}`} className="block rounded-lg border px-3 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-900">
+                      <p className="truncate text-sm font-medium">{note.title || "Untitled"}</p>
+                      <p className="truncate text-xs text-zinc-500">{excerpt(note.body, 80)}</p>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            ),
+          },
+          {
+            id: "calendar",
+            label: "Calendar",
+            content: <ProjectCalendar wid={wid} projectId={project.id} />,
+          },
+          {
+            id: "dependencies",
+            label: "Dependencies",
+            content: <ProjectDependenciesTab wid={wid} projectId={project.id} />,
+          },
+          {
+            id: "goals",
+            label: "Goals",
+            content: goals.find((g) => g.id === project.goalId) ? (
+              <div className="text-sm">
+                Linked goal:{" "}
+                <Link href={`/goals/${project.goalId}`} className="text-indigo-600 hover:underline">
+                  {goals.find((g) => g.id === project.goalId)?.label}
+                </Link>
+              </div>
+            ) : (
+              <p className="text-sm text-zinc-500">No goal linked.</p>
+            ),
+          },
+        ]}
+        defaultValue="overview"
+      />
 
       {editing ? (
         <ProjectEditorDialog
@@ -258,5 +287,24 @@ export function ProjectDetail({ wid, project, notes, goals }: ProjectDetailProps
         <p className="text-sm text-zinc-500">This cannot be undone.</p>
       </Dialog>
     </div>
+  );
+}
+
+function ProjectCalendar({ wid, projectId }: { wid: string; projectId: string }) {
+  const { data: events, isLoading } = useListEventsQuery({ wid });
+  if (isLoading) return <p className="text-sm text-zinc-500">Loading calendar…</p>;
+  const filtered = (events ?? []).filter((e) => (e as unknown as { projectId?: string }).projectId === projectId);
+  if (filtered.length === 0) return <p className="text-sm text-zinc-500">No events linked to this project.</p>;
+  return (
+    <ul className="grid gap-2">
+      {filtered.slice(0, 8).map((e) => (
+        <li key={e.id} className="rounded border px-3 py-2 text-sm">
+          <span className="font-medium">{e.title}</span>
+          <span className="ml-2 text-xs text-zinc-500">
+            {new Date(e.startsAt).toLocaleDateString()} – {new Date(e.endsAt).toLocaleDateString()}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }

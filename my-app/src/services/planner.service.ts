@@ -24,15 +24,61 @@ export async function previewPlan(
   const dayEnd = new Date(date);
   dayEnd.setHours(23, 59, 59, 999);
 
-  const [tasks, events, projects] = await Promise.all([
+  const [tasks, events, projects, insights, depGraph] = await Promise.all([
     listUserTasks(userId, workspaceId, { limit: 200 }, now),
     listUserEvents(userId, workspaceId, { from: dayStart, to: dayEnd, limit: 100 }),
     listUserProjects(userId, workspaceId),
+    getInsights(userId, workspaceId, now).catch(() => null),
+    (async () => {
+      try {
+        const { getTaskDependencyGraph } = await import("@/src/services/task-dependency.service");
+        return await getTaskDependencyGraph(userId, workspaceId);
+      } catch {
+        return null;
+      }
+    })(),
   ]);
   const projectNames = new Map(projects.map((p) => [p.id, p.name]));
 
+  // Workspace goals for candidate enrichment
+  let goals: Array<{ id: string; title: string }> = [];
+  try {
+    const { listUserGoals } = await import("@/src/services/goal.service");
+    goals = await listUserGoals(userId, workspaceId);
+  } catch {
+    goals = [];
+  }
+  const goalMap = new Map(goals.map((g) => [g.id, g.title]));
+
+  // Dependency-aware: blocked vs ready via DAG blockedClosure, critical path, downstream counts
+  const blockedMap = depGraph?.blocked ?? {};
+  const criticalSet = new Set(depGraph?.criticalPath.path ?? []);
+  // downstream dependents count (how many tasks this one unblocks, transitive via forward edges)
+  const downstreamCounts = (() => {
+    if (!depGraph) return new Map<string, number>();
+    const fwd = new Map<string, string[]>();
+    for (const n of depGraph.nodes) fwd.set(n.id, []);
+    for (const e of depGraph.edges) fwd.get(e.predecessorTaskId)?.push(e.successorTaskId);
+    const memo = new Map<string, number>();
+    const dfs = (id: string, vis: Set<string> = new Set()): number => {
+      if (memo.has(id)) return memo.get(id)!;
+      if (vis.has(id)) return 0;
+      vis.add(id);
+      let count = 0;
+      for (const succ of fwd.get(id) ?? []) {
+        count += 1 + dfs(succ, new Set(vis));
+      }
+      memo.set(id, count);
+      return count;
+    };
+    for (const n of depGraph.nodes) dfs(n.id);
+    return memo;
+  })();
+
   const candidates = tasks
     .filter((t) => t.status === "todo" || t.status === "in_progress")
+    // Dependency-aware filter: blocked tasks are not ready and are excluded from day plan
+    .filter((t) => !blockedMap[t.id])
     .filter((t) => {
       if (!t.dueAt) return true;
       return new Date(t.dueAt).getTime() <= dayEnd.getTime() || isOverdueTask(t, now);
@@ -46,15 +92,29 @@ export async function previewPlan(
       durationMin: t.durationMin,
       overdue: isOverdueTask(t, now),
       projectName: t.projectId ? projectNames.get(t.projectId) : undefined,
+      goalTitle: t.goalId ? goalMap.get(t.goalId) : undefined,
+      blocked: !!blockedMap[t.id],
+      ready: !blockedMap[t.id],
+      critical: criticalSet.has(t.id),
+      dependentsCount: downstreamCounts.get(t.id) ?? 0,
     }));
 
+  // Prioritize tasks that unblock other important tasks (higher dependents, critical)
+  candidates.sort((a, b) => {
+    if (a.critical !== b.critical) return a.critical ? -1 : 1;
+    if ((b.dependentsCount ?? 0) !== (a.dependentsCount ?? 0)) return (b.dependentsCount ?? 0) - (a.dependentsCount ?? 0);
+    return 0;
+  });
+
+  // Keep capacity adaptive like weekly plan
+  const capacityPerDay = insights?.metrics.completionRate !== undefined && insights.metrics.completionRate < 40 ? 5 : 8;
   return buildDayPlan(
     new Date(date),
-    candidates,
+    candidates as never,
     events
       .filter((e) => e.status !== "cancelled")
       .map((e) => ({ start: e.startsAt, end: e.endsAt })),
-    options,
+    { ...options, maxTasksPerDay: options.maxTasksPerDay ?? capacityPerDay },
     now,
   );
 }
@@ -91,10 +151,47 @@ export async function previewWeek(
     getInsights(userId, workspaceId, now),
   ]);
   const projectNames = new Map(projects.map((p) => [p.id, p.name]));
+  let weekGoals: Array<{ id: string; title: string }> = [];
+  try {
+    const { listUserGoals } = await import("@/src/services/goal.service");
+    weekGoals = await listUserGoals(userId, workspaceId);
+  } catch {
+    weekGoals = [];
+  }
+  const weekGoalMap = new Map(weekGoals.map((g) => [g.id, g.title]));
   const capacityPerDay = insights.metrics.completionRate < 40 ? 5 : 8;
+
+  // Dependency-aware for week as well: blocked vs ready, chains, critical
+  let weekBlocked: Record<string, boolean> = {};
+  let weekCritical = new Set<string>();
+  let weekDependents = new Map<string, number>();
+  try {
+    const { getTaskDependencyGraph } = await import("@/src/services/task-dependency.service");
+    const wg = await getTaskDependencyGraph(userId, workspaceId);
+    weekBlocked = wg.blocked;
+    weekCritical = new Set(wg.criticalPath.path);
+    const fwd = new Map<string, string[]>();
+    for (const n of wg.nodes) fwd.set(n.id, []);
+    for (const e of wg.edges) fwd.get(e.predecessorTaskId)?.push(e.successorTaskId);
+    const memo = new Map<string, number>();
+    const dfs = (id: string, vis = new Set<string>()): number => {
+      if (memo.has(id)) return memo.get(id)!;
+      if (vis.has(id)) return 0;
+      vis.add(id);
+      let c = 0;
+      for (const succ of fwd.get(id) ?? []) c += 1 + dfs(succ, new Set(vis));
+      memo.set(id, c);
+      return c;
+    };
+    for (const n of wg.nodes) dfs(n.id);
+    weekDependents = memo;
+  } catch {
+    // graph unavailable — proceed without dependency weighting
+  }
 
   const candidates = tasks
     .filter((t) => t.status === "todo" || t.status === "in_progress")
+    .filter((t) => !weekBlocked[t.id])
     .slice(0, 100)
     .map((t) => ({
       id: t.id,
@@ -104,7 +201,15 @@ export async function previewWeek(
       durationMin: t.durationMin,
       overdue: isOverdueTask(t, now),
       projectName: t.projectId ? projectNames.get(t.projectId) : undefined,
-    }));
+      goalTitle: t.goalId ? weekGoalMap.get(t.goalId) : undefined,
+      critical: weekCritical.has(t.id),
+      dependentsCount: weekDependents.get(t.id) ?? 0,
+    }))
+    .sort((a, b) => {
+      if (a.critical !== b.critical) return a.critical ? -1 : 1;
+      if ((b.dependentsCount ?? 0) !== (a.dependentsCount ?? 0)) return (b.dependentsCount ?? 0) - (a.dependentsCount ?? 0);
+      return 0;
+    });
 
   const busyByDay = new Map<string, Array<{ start: Date; end: Date }>>();
   const dayKeyOf = (d: Date): string => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;

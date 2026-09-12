@@ -53,6 +53,19 @@ export const TOOL_NAMES = [
   "plan_day",
   "plan_week",
   "analyze_project_dependencies",
+  "get_blocked_tasks",
+  "get_ready_tasks",
+  "find_circular_dependencies",
+  "get_critical_path",
+  "get_most_blocking_task",
+  "suggest_dependencies",
+  // Required exact names for Dependency Graph AI
+  "get_dependency_graph",
+  "get_task_dependencies",
+  "get_task_dependents",
+  "detect_dependency_cycles",
+  "create_dependency",
+  "delete_dependency",
 ] as const;
 
 export type ToolName = (typeof TOOL_NAMES)[number];
@@ -578,12 +591,13 @@ export function makeTools(ctx: ToolContext, opts: { allowlist?: readonly string[
           })),
         })),
         unscheduled: plan.unscheduled,
+        note: "Plan is dependency-aware: blocked tasks excluded, tasks that unblock others (e.g., A blocks B/C → A first) are prioritized alongside deadline/priority/duration. Preview only — requires user confirmation to apply.",
       });
     },
     {
       name: "plan_day",
       description:
-        "Build a Morning/Afternoon/Evening plan from overdue, priority, deadlines, durations, events, and goals. Present it first — applying needs explicit user confirmation via the planner UI.",
+        "Build a dependency-aware Morning/Afternoon/Evening plan. Considers blocked vs ready tasks, dependency chains, priorities, deadlines, estimated duration, calendar events, and goals; prioritizes tasks that unblock other important tasks (e.g., A blocks B/C → suggest A first) and explains briefly. Preview only — do not overwrite schedule without confirmation via planner UI.",
       schema: z.object({ date: isoDate.optional().describe("ISO date, defaults to today") }),
     },
   );
@@ -611,12 +625,13 @@ export function makeTools(ctx: ToolContext, opts: { allowlist?: readonly string[
         })),
         unscheduled: plan.unscheduled,
         summary: plan.summary,
+        note: "Week plan is dependency-aware (blocked excluded, unblockers prioritized, critical path considered). Preview only.",
       });
     },
     {
       name: "plan_week",
       description:
-        "Build a Monday–Sunday plan from incomplete tasks, projects, goals, deadlines, events, and recent productivity. Present it first — applying needs explicit user confirmation via the planner UI.",
+        "Build a dependency-aware Monday–Sunday plan. Considers blocked/ready tasks, chains, priorities, deadlines, durations, events, and goals; prioritizes unblocking tasks and explains briefly. Preview only — requires confirmation.",
       schema: z.object({ date: isoDate.optional().describe("ISO date within the target week") }),
     },
   );
@@ -639,8 +654,265 @@ export function makeTools(ctx: ToolContext, opts: { allowlist?: readonly string[
     {
       name: "analyze_project_dependencies",
       description:
-        'Analyze project dependencies: inspect tasks, projects, goals, existing dependencies, descriptions, dates, durations and suggest missing dependencies. Example: "Build Product UI" may depend on "Build Product API". Returns {sourceTaskId,targetTaskId,reason,confidence} without modifying DB.',
+        'Analyze project dependencies: inspect tasks, projects, goals, existing dependencies, descriptions, dates, durations and suggest missing dependencies. Example: "Build Product UI" may depend on "Build Product API". Returns {sourceTaskId,targetTaskId,reason,confidence} without modifying DB. Use for: "Analyze my project dependencies."',
       schema: z.object({ projectId: z.string().optional().describe("Project to analyze; omit for workspace-wide") }),
+    },
+  );
+
+  const get_blocked_tasks = tool(
+    async ({ projectId }) => {
+      const { getBlockedTasks } = await import("@/src/services/task-dependency.service");
+      const blocked = await getBlockedTasks(userId, wid);
+      let filtered = blocked;
+      if (projectId) {
+        // Filter by project via task lookup
+        const { listUserTasks } = await import("@/src/services/task.service");
+        const tasks = await listUserTasks(userId, wid, { projectId } as never);
+        const ids = new Set(tasks.map((t) => t.id));
+        filtered = blocked.filter((b) => ids.has(b.id));
+      }
+      return JSON.stringify({
+        blocked: filtered.slice(0, 20).map((b) => ({ id: b.id, title: b.title, status: b.status, blockedBy: b.blockedBy, href: href("task", b.id) })),
+        totalBlocked: filtered.length,
+        note: "Blocked = predecessor not completed. Use task href to focus in graph.",
+      });
+    },
+    {
+      name: "get_blocked_tasks",
+      description: 'Show blocked tasks. Use for: "Show my blocked tasks." and "What is blocking my project?" Returns blocked tasks with blockedBy ids. Optional projectId filters.',
+      schema: z.object({ projectId: z.string().optional().describe("If set, only blocked tasks in this project") }),
+    },
+  );
+
+  const get_ready_tasks = tool(
+    async ({ projectId, limit }) => {
+      const { getReadyTasks } = await import("@/src/services/task-dependency.service");
+      let ready = await getReadyTasks(userId, wid);
+      if (projectId) {
+        const { listUserTasks } = await import("@/src/services/task.service");
+        const tasks = await listUserTasks(userId, wid, { projectId } as never);
+        const ids = new Set(tasks.map((t) => t.id));
+        ready = ready.filter((r) => ids.has(r.id));
+      }
+      const slice = ready.slice(0, Math.min(limit ?? 10, 20));
+      return JSON.stringify({
+        ready: slice.map((r) => ({ id: r.id, title: r.title, status: r.status, href: href("task", r.id) })),
+        totalReady: ready.length,
+        note: "Ready = all blocking dependencies completed. Safe to start now.",
+      });
+    },
+    {
+      name: "get_ready_tasks",
+      description: 'Show tasks I can start now / What should I work on next. Use for: "Show tasks I can start now." and "What should I work on next?" Returns ready tasks prioritized by unblocking, priority, deadline.',
+      schema: z.object({
+        projectId: z.string().optional(),
+        limit: z.number().min(1).max(20).optional().describe("Max results, default 10"),
+      }),
+    },
+  );
+
+  const find_circular_dependencies = tool(
+    async ({ projectId }) => {
+      const { getTaskDependencyGraph, getProjectDependencyGraph } = await import("@/src/services/task-dependency.service");
+      const graph = projectId ? await getProjectDependencyGraph(userId, wid, projectId) : await getTaskDependencyGraph(userId, wid);
+      if (graph.cycle) {
+        const titleMap = new Map(graph.nodes.map((n) => [n.id, n.title]));
+        return JSON.stringify({
+          hasCycle: true,
+          cycle: graph.cycle,
+          cycleTitles: graph.cycle.map((id) => titleMap.get(id) ?? id),
+          message: `Circular dependency: ${graph.cycle.map((id) => titleMap.get(id) ?? id).join(" → ")}`,
+        });
+      }
+      return JSON.stringify({ hasCycle: false, message: "No circular dependencies found." });
+    },
+    {
+      name: "find_circular_dependencies",
+      description: 'Find circular dependencies. Use for: "Find circular dependencies." Checks workspace or project graph for cycles.',
+      schema: z.object({ projectId: z.string().optional() }),
+    },
+  );
+
+  const get_critical_path = tool(
+    async ({ projectId }) => {
+      const { getProjectCriticalPath } = await import("@/src/services/task-dependency.service");
+      if (!projectId) return JSON.stringify({ error: "projectId is required to compute critical path." });
+      const result = await getProjectCriticalPath(userId, wid, projectId);
+      return JSON.stringify({
+        criticalPath: result.criticalPath,
+        criticalTasks: result.criticalTasks.map((t) => ({ id: t.id, title: t.title, durationMin: t.durationMin, href: href("task", t.id) })),
+        totalDuration: result.totalDuration,
+        totalDurationHours: result.totalDurationHours,
+      });
+    },
+    {
+      name: "get_critical_path",
+      description: 'What is the critical path? Use for: "What is the critical path?" Returns longest dependency path with durations for a project.',
+      schema: z.object({ projectId: z.string().min(1).describe("Project to analyze") }),
+    },
+  );
+
+  const get_most_blocking_task = tool(
+    async ({ projectId }) => {
+      const { getTaskDependencyGraph, getProjectDependencyGraph } = await import("@/src/services/task-dependency.service");
+      const graph = projectId ? await getProjectDependencyGraph(userId, wid, projectId) : await getTaskDependencyGraph(userId, wid);
+      // downstream counts via forward adjacency
+      const fwd = new Map<string, string[]>();
+      for (const n of graph.nodes) fwd.set(n.id, []);
+      for (const e of graph.edges) fwd.get(e.predecessorTaskId)?.push(e.successorTaskId);
+      const memo = new Map<string, number>();
+      const dfs = (id: string, vis = new Set<string>()): number => {
+        if (memo.has(id)) return memo.get(id)!;
+        if (vis.has(id)) return 0;
+        vis.add(id);
+        let c = 0;
+        for (const succ of fwd.get(id) ?? []) c += 1 + dfs(succ, new Set(vis));
+        memo.set(id, c);
+        return c;
+      };
+      for (const n of graph.nodes) dfs(n.id);
+      let best: { id: string; title: string; count: number } | null = null;
+      for (const n of graph.nodes) {
+        const count = memo.get(n.id) ?? 0;
+        if (!best || count > best.count) best = { id: n.id, title: n.title, count };
+      }
+      if (!best || best.count === 0) return JSON.stringify({ message: "No blocking tasks — all tasks are independent or ready." });
+      return JSON.stringify({
+        mostBlocking: { id: best.id, title: best.title, href: href("task", best.id), blockingCount: best.count, reason: `Blocks ${best.count} downstream task(s)` },
+      });
+    },
+    {
+      name: "get_most_blocking_task",
+      description: 'Which task is blocking the most work? Use for: "Which task is blocking the most work?" Returns the task with most downstream dependents.',
+      schema: z.object({ projectId: z.string().optional() }),
+    },
+  );
+
+  const suggest_dependencies = tool(
+    async ({ projectId }) => {
+      const { suggestProjectDependencies } = await import("@/src/services/dependency-suggestion.service");
+      const suggestions = await suggestProjectDependencies({ userId, workspaceId: wid, projectId });
+      return JSON.stringify({
+        suggestions: suggestions.map((s) => ({
+          sourceTaskId: s.sourceTaskId,
+          targetTaskId: s.targetTaskId,
+          reason: s.reason,
+          confidence: s.confidence,
+          sourceHref: href("task", s.sourceTaskId),
+          targetHref: href("task", s.targetTaskId),
+        })),
+        note: "Suggestions not yet saved — require explicit Accept.",
+      });
+    },
+    {
+      name: "suggest_dependencies",
+      description: 'Suggest dependencies for this project. Use for: "Suggest dependencies for this project." Inspects tasks, descriptions, dates, durations and returns {sourceTaskId,targetTaskId,reason,confidence}.',
+      schema: z.object({ projectId: z.string().optional() }),
+    },
+  );
+
+  // ---------------------------------------------------------------------------
+  // Required exact names — each validates, verifies auth/workspace, calls service
+  // ---------------------------------------------------------------------------
+
+  const get_dependency_graph = tool(
+    async ({ projectId }) => {
+      const { getTaskDependencyGraph, getProjectDependencyGraph } = await import("@/src/services/task-dependency.service");
+      const graph = projectId ? await getProjectDependencyGraph(userId, wid, projectId) : await getTaskDependencyGraph(userId, wid);
+      return JSON.stringify({
+        nodes: graph.nodes.map((n) => ({ id: n.id, title: n.title, status: n.status, href: href("task", n.id) })),
+        edges: graph.edges,
+        blocked: graph.blocked,
+        stats: graph.stats,
+        cycle: graph.cycle,
+      });
+    },
+    {
+      name: "get_dependency_graph",
+      description: "Get dependency graph (nodes/edges/blocked) for workspace or project. Validates workspace access via service.",
+      schema: z.object({ projectId: z.string().optional().describe("Project to scope graph") }),
+    },
+  );
+
+  const get_task_dependencies = tool(
+    async ({ taskId }) => {
+      const { getTaskDependencies } = await import("@/src/services/task-dependency.service");
+      const deps = await getTaskDependencies(userId, wid, taskId);
+      return JSON.stringify({
+        dependencies: deps.map((d) => ({ id: d.id, predecessorTaskId: d.predecessorTaskId, successorTaskId: d.successorTaskId, type: d.type, href: href("task", d.predecessorTaskId) })),
+      });
+    },
+    {
+      name: "get_task_dependencies",
+      description: "Get dependencies for a task (incoming edges where task is blocked). Returns predecessor tasks.",
+      schema: z.object({ taskId: z.string().min(1).describe("Task to get dependencies for") }),
+    },
+  );
+
+  const get_task_dependents = tool(
+    async ({ taskId }) => {
+      const { getTaskDependents } = await import("@/src/services/task-dependency.service");
+      const deps = await getTaskDependents(userId, wid, taskId);
+      return JSON.stringify({
+        dependents: deps.map((d) => ({ id: d.id, predecessorTaskId: d.predecessorTaskId, successorTaskId: d.successorTaskId, type: d.type, href: href("task", d.successorTaskId) })),
+      });
+    },
+    {
+      name: "get_task_dependents",
+      description: "Get dependents for a task (outgoing edges where task blocks others). Returns successor tasks.",
+      schema: z.object({ taskId: z.string().min(1).describe("Task to get dependents for") }),
+    },
+  );
+
+  const detect_dependency_cycles = tool(
+    async ({ projectId }) => {
+      const { getTaskDependencyGraph, getProjectDependencyGraph } = await import("@/src/services/task-dependency.service");
+      const graph = projectId ? await getProjectDependencyGraph(userId, wid, projectId) : await getTaskDependencyGraph(userId, wid);
+      if (graph.cycle) {
+        const titles = new Map(graph.nodes.map((n) => [n.id, n.title]));
+        return JSON.stringify({
+          hasCycle: true,
+          cycle: graph.cycle,
+          cycleTitles: graph.cycle.map((id) => titles.get(id) ?? id),
+          message: `Circular dependency: ${graph.cycle.map((id) => titles.get(id) ?? id).join(" → ")}`,
+        });
+      }
+      return JSON.stringify({ hasCycle: false, message: "No circular dependencies." });
+    },
+    {
+      name: "detect_dependency_cycles",
+      description: "Detect dependency cycles (circular dependencies) via graph traversal. Use before creating edges; returns cycle if B already reaches A.",
+      schema: z.object({ projectId: z.string().optional() }),
+    },
+  );
+
+  const create_dependency = tool(
+    async ({ predecessorTaskId, successorTaskId, type }) => {
+      const { createDependency } = await import("@/src/services/task-dependency.service");
+      const dep = await createDependency({ userId, workspaceId: wid, predecessorTaskId, successorTaskId, type: type ?? "blocks" });
+      return JSON.stringify({ dependency: { id: dep.id, predecessorTaskId: dep.predecessorTaskId, successorTaskId: dep.successorTaskId, type: dep.type }, note: "Edge saved; cycle checked before create." });
+    },
+    {
+      name: "create_dependency",
+      description: "Create a dependency edge. Validates args, verifies workspace access, checks cycle (rejects if B reaches A), calls service.",
+      schema: z.object({
+        predecessorTaskId: z.string().min(1),
+        successorTaskId: z.string().min(1),
+        type: z.enum(["blocks", "blocked_by", "related"]).optional().describe("Default blocks"),
+      }),
+    },
+  );
+
+  const delete_dependency = tool(
+    async ({ dependencyId }) => {
+      const { deleteDependency } = await import("@/src/services/task-dependency.service");
+      await deleteDependency(userId, wid, dependencyId);
+      return JSON.stringify({ ok: true, deletedId: dependencyId });
+    },
+    {
+      name: "delete_dependency",
+      description: "Delete a dependency edge. Validates, verifies workspace access via service.",
+      schema: z.object({ dependencyId: z.string().min(1) }),
     },
   );
 
@@ -655,6 +927,18 @@ export function makeTools(ctx: ToolContext, opts: { allowlist?: readonly string[
     get_daily_schedule, get_productivity_stats,
     plan_day, plan_week,
     analyze_project_dependencies,
+    get_blocked_tasks,
+    get_ready_tasks,
+    find_circular_dependencies,
+    get_critical_path,
+    get_most_blocking_task,
+    suggest_dependencies,
+    get_dependency_graph,
+    get_task_dependencies,
+    get_task_dependents,
+    detect_dependency_cycles,
+    create_dependency,
+    delete_dependency,
     // Extras beyond the core set:
     reopen_task, list_events, list_projects,
   ];

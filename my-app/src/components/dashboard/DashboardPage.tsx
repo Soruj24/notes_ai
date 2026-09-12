@@ -1,6 +1,9 @@
 "use client";
 
 import { BlockedTasks } from "@/src/components/dashboard/BlockedTasks";
+import { ReadyToStart } from "@/src/components/dashboard/ReadyToStart";
+import { CriticalPathCard } from "@/src/components/dashboard/CriticalPathCard";
+import { DependencyAlerts } from "@/src/components/dashboard/DependencyAlerts";
 import { GoalsProgress } from "@/src/components/dashboard/GoalsProgress";
 import { GreetingHeader } from "@/src/components/dashboard/GreetingHeader";
 import { InsightsPanel } from "@/src/components/dashboard/InsightsPanel";
@@ -32,6 +35,9 @@ export function DashboardPage({ wid, userName }: DashboardPageProps) {
           <QuickCapture wid={wid} />
           <TodayTasks wid={wid} />
           <BlockedTasks wid={wid} />
+          <ReadyToStart wid={wid} />
+          <CriticalPathCard wid={wid} />
+          <DependencyAlerts wid={wid} />
           <TodayTimeline wid={wid} />
           <RecentNotes wid={wid} />
         </div>

@@ -13,6 +13,11 @@ export interface PlanCandidate {
   durationMin?: number | null;
   overdue: boolean;
   projectName?: string;
+  goalTitle?: string;
+  blocked?: boolean;
+  ready?: boolean;
+  critical?: boolean;
+  dependentsCount?: number;
 }
 
 export interface BusyBlock {
@@ -72,6 +77,11 @@ function atHour(day: Date, hour: number): Date {
 
 function reasonFor(c: PlanCandidate, now: Date): string {
   const parts: string[] = [];
+  // Dependency-aware: tasks that unblock others are explained
+  if (c.critical) parts.push("Critical path");
+  if (c.dependentsCount && c.dependentsCount > 0) {
+    parts.push(`Unblocks ${c.dependentsCount} task${c.dependentsCount === 1 ? "" : "s"}`);
+  }
   if (c.overdue) {
     parts.push("Overdue — clear first");
   } else if (c.dueAt) {
@@ -89,18 +99,26 @@ function reasonFor(c: PlanCandidate, now: Date): string {
     parts.push(`${c.priority} priority`);
   }
   if (c.projectName) parts.push(`advances ${c.projectName}`);
+  if (c.goalTitle) parts.push(`goal: ${c.goalTitle}`);
   if (!parts.length) parts.push("Fits your day");
-  return parts.join(" · ");
+  // Keep brief — max 3 parts
+  return parts.slice(0, 3).join(" · ");
 }
 
-function sortKey(c: PlanCandidate): [number, number, number, number] {
+function sortKey(c: PlanCandidate): [number, number, number, number, number] {
+  // Blocked tasks are already filtered in planner.service, but keep as last resort sort
+  if (c.blocked) return [9, 9, Number.MAX_SAFE_INTEGER, 9, 9] as never;
   const dueTime = c.dueAt ? new Date(c.dueAt).getTime() : Number.MAX_SAFE_INTEGER;
+  // Priority boost for unblocking: more dependents first, critical before non-critical
+  const unblockRank = c.dependentsCount ? Math.max(0, 10 - Math.min(10, c.dependentsCount)) : 10;
+  const criticalRank = c.critical ? 0 : 1;
   return [
     c.overdue ? 0 : 1,
-    c.dueAt ? 0 : 1,
+    criticalRank,
+    unblockRank,
     dueTime,
     PRIORITY_RANK[c.priority] ?? 9,
-  ];
+  ] as unknown as [number, number, number, number, number];
 }
 
 interface FreeSlot {
