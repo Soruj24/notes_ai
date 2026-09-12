@@ -135,6 +135,35 @@ export async function listTasks(
   return docs.map((d) => toRecord(d as Record<string, unknown>));
 }
 
+/**
+ * Optimized for dependency graph at scale (100/500/1000+ tasks).
+ * Projects only needed fields, avoids notes/subtasks/tags payload.
+ * Limit capped to 1000 to keep graph usable; pagination for lists handles the rest.
+ */
+export async function listTasksForGraph(
+  userId: string,
+  workspaceId: string,
+  filter: { projectId?: string } = {},
+): Promise<Array<{ id: string; title: string; status: TaskStatus; projectId?: string; priority: Priority; durationMin?: number }>> {
+  const member = await requireMembership(userId, workspaceId);
+  await db();
+  const query: Record<string, unknown> = { workspaceId: member.workspaceId };
+  if (filter.projectId) query.projectId = oid(filter.projectId, "projectId");
+  const docs = await Task.find(query)
+    .select({ title: 1, status: 1, projectId: 1, priority: 1, durationMin: 1, workspaceId: 1 })
+    .sort({ updatedAt: -1 })
+    .limit(1000)
+    .lean();
+  return docs.map((d) => ({
+    id: String((d as Record<string, unknown>).id ?? (d as Record<string, unknown>)._id),
+    title: (d as Record<string, unknown>).title as string,
+    status: (d as Record<string, unknown>).status as TaskStatus,
+    projectId: (d as Record<string, unknown>).projectId ? String((d as Record<string, unknown>).projectId) : undefined,
+    priority: (d as Record<string, unknown>).priority as Priority,
+    durationMin: (d as Record<string, unknown>).durationMin as number | undefined,
+  }));
+}
+
 export async function countTasks(
   userId: string,
   workspaceId: string,
@@ -222,6 +251,7 @@ export async function updateTask(input: {
   tagIds?: string[];
   recurrence?: Recurrence;
   recurrenceUntil?: Date | null;
+  ownerId?: string | null;
 }): Promise<TaskRecord> {
   const member = await requireWritableMembership(input.userId, input.workspaceId);
   await db();
@@ -250,6 +280,18 @@ export async function updateTask(input: {
   if (input.recurrence !== undefined) doc.recurrence = input.recurrence;
   if (input.recurrenceUntil !== undefined)
     doc.recurrenceUntil = input.recurrenceUntil ?? undefined;
+  if (input.ownerId !== undefined) {
+    if (input.ownerId === null || input.ownerId === "") {
+      // No-op: keep current owner
+    } else {
+      // Verify assignee is member of workspace
+      const assigneeId = oid(input.ownerId, "ownerId");
+      const { WorkspaceMember } = await import("@/src/models/workspace-member.model");
+      const isMember = await WorkspaceMember.findOne({ workspaceId: member.workspaceId, userId: assigneeId }).lean();
+      if (!isMember) throw new NotFoundError("Assignee is not a workspace member.");
+      doc.ownerId = assigneeId;
+    }
+  }
   await doc.save();
   return toRecord(doc.toObject() as Record<string, unknown>);
 }

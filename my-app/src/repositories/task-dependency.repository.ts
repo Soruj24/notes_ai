@@ -160,7 +160,27 @@ export async function listTaskDependencies(
   }
   if (filter.type) query.type = filter.type;
 
-  const docs = await TaskDependency.find(query).sort({ createdAt: -1 }).lean();
+  const docs = await TaskDependency.find(query)
+    .select({ workspaceId: 1, predecessorTaskId: 1, successorTaskId: 1, type: 1, createdBy: 1, createdAt: 1, updatedAt: 1 })
+    .sort({ createdAt: -1 })
+    .limit(2000)
+    .lean();
+  return docs.map((d) => toRecord(d as Record<string, unknown>));
+}
+
+/**
+ * Graph-optimized: lean without sort overhead, capped to 2000 edges.
+ */
+export async function listDependenciesForGraph(
+  userId: string,
+  workspaceId: string,
+): Promise<TaskDependencyRecord[]> {
+  const member = await requireMembership(userId, workspaceId);
+  await db();
+  const docs = await TaskDependency.find({ workspaceId: member.workspaceId })
+    .select({ predecessorTaskId: 1, successorTaskId: 1, type: 1, workspaceId: 1 })
+    .lean()
+    .limit(2000);
   return docs.map((d) => toRecord(d as Record<string, unknown>));
 }
 

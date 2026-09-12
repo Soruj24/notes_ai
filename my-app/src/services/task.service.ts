@@ -95,6 +95,7 @@ export async function updateUserTask(input: {
   tagIds?: string[];
   recurrence?: Recurrence;
   recurrenceUntil?: Date | null;
+  ownerId?: string | null;
 }): Promise<TaskRecord> {
   await requireFlag("tasks", input.userId);
   const task = await updateTask(input);

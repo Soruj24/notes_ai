@@ -20,50 +20,39 @@ interface Props {
 export function SuggestedDependencies({ suggestions, taskTitles, onAccept, onReject, onAcceptAll, onRejectAll, isProcessing }: Props) {
   if (!suggestions.length) return null;
   return (
-    <div className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-4 dark:border-indigo-900/50 dark:bg-indigo-950/20">
-      <div className="flex items-start justify-between gap-2">
+    <div className="rounded-md border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-zinc-100 px-3 py-2.5 dark:border-zinc-900">
         <div>
-          <h3 className="text-sm font-semibold text-indigo-900 dark:text-indigo-200">Suggested Dependencies</h3>
-          <p className="text-xs text-indigo-700/70 dark:text-indigo-300/70">AI inspected tasks, projects, goals, dates & durations. Accept does not auto-modify — choose individually.</p>
+          <h3 className="text-xs font-semibold tracking-wide text-zinc-900 dark:text-zinc-100">Suggested dependencies</h3>
+          <p className="text-[11px] leading-4 text-zinc-500">AI — not yet saved. Review before accepting.</p>
         </div>
         <div className="flex gap-1.5">
-          <button
-            onClick={onAcceptAll}
-            disabled={isProcessing}
-            className="rounded-md bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-          >
+          <button onClick={onAcceptAll} disabled={isProcessing} className="h-7 rounded-md bg-zinc-900 px-2.5 text-xs font-medium text-white hover:bg-zinc-800 disabled:opacity-40 dark:bg-white dark:text-zinc-900">
             Accept all
           </button>
-          <button onClick={onRejectAll} className="rounded-md border border-indigo-200 bg-white px-3 py-1 text-xs hover:bg-indigo-50 dark:border-indigo-800 dark:bg-zinc-950">
+          <button onClick={onRejectAll} className="h-7 rounded-md border border-zinc-200 bg-white px-2.5 text-xs font-medium hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950">
             Reject all
           </button>
         </div>
       </div>
 
-      <ul className="mt-3 grid gap-2">
+      <ul className="divide-y divide-zinc-100 dark:divide-zinc-900">
         {suggestions.map((s) => (
-          <li key={`${s.sourceTaskId}->${s.targetTaskId}`} className="flex items-center gap-2 rounded-lg border border-indigo-100 bg-white p-2.5 text-sm dark:border-indigo-900 dark:bg-zinc-950">
+          <li key={`${s.sourceTaskId}->${s.targetTaskId}`} className="flex items-start gap-3 px-3 py-2.5">
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-1 text-xs">
-                <span className="rounded bg-zinc-100 px-1.5 py-0.5 font-medium dark:bg-zinc-800">{taskTitles.get(s.sourceTaskId) ?? s.sourceTaskId.slice(0, 6)}</span>
-                <span className="text-zinc-400">may block</span>
-                <span className="rounded bg-zinc-100 px-1.5 py-0.5 font-medium dark:bg-zinc-800">{taskTitles.get(s.targetTaskId) ?? s.targetTaskId.slice(0, 6)}</span>
-                <span className="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-950/40">{Math.round(s.confidence * 100)}%</span>
+                <span className="truncate font-medium text-zinc-900 dark:text-zinc-100">{taskTitles.get(s.sourceTaskId) ?? s.sourceTaskId.slice(0, 6)}</span>
+                <span className="text-zinc-400">→</span>
+                <span className="truncate font-medium text-zinc-900 dark:text-zinc-100">{taskTitles.get(s.targetTaskId) ?? s.targetTaskId.slice(0, 6)}</span>
+                <span className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-[10px] font-medium text-zinc-600 dark:bg-zinc-900 dark:text-zinc-400">{Math.round(s.confidence * 100)}%</span>
               </div>
-              <p className="mt-1 text-xs leading-4 text-zinc-500 dark:text-zinc-400">{s.reason}</p>
-              <p className="mt-0.5 font-mono text-[10px] text-zinc-400">
-                {s.sourceTaskId.slice(0, 6)} → {s.targetTaskId.slice(0, 6)}
-              </p>
+              <p className="mt-1 text-xs leading-4 text-zinc-500">{s.reason}</p>
             </div>
             <div className="flex shrink-0 gap-1">
-              <button
-                onClick={() => onAccept(s)}
-                disabled={isProcessing}
-                className="rounded bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
-              >
+              <button onClick={() => onAccept(s)} disabled={isProcessing} className="h-7 rounded-md bg-zinc-900 px-2.5 text-xs font-medium text-white hover:bg-zinc-800 disabled:opacity-40 dark:bg-white dark:text-zinc-900">
                 Accept
               </button>
-              <button onClick={() => onReject(s)} className="rounded border px-2.5 py-1 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-900">
+              <button onClick={() => onReject(s)} className="h-7 rounded-md border border-zinc-200 bg-white px-2.5 text-xs hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950">
                 Reject
               </button>
             </div>

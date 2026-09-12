@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "seed": "node scripts/seed.mjs"
+    "seed": "node scripts/seed.mjs",
+    "test": "tsx --test tests/**/*.test.ts",
+    "test:deps": "tsx --test tests/dependency-graph.test.ts"
   },
   "dependencies": {
     "@langchain/core": "^1.2.9",
@@ -34,6 +36,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.3.4",
     "tailwindcss": "^4",
+    "tsx": "^4.19.0",
     "typescript": "^5"
   }
 }

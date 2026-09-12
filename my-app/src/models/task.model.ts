@@ -67,6 +67,11 @@ taskSchema.index({ workspaceId: 1, status: 1, dueAt: 1 });
 taskSchema.index({ workspaceId: 1, projectId: 1 });
 taskSchema.index({ workspaceId: 1, goalId: 1 });
 taskSchema.index({ workspaceId: 1, updatedAt: -1 });
+// Optimized for dependency graph + pagination at scale (100/500/1000+ tasks)
+taskSchema.index({ workspaceId: 1, createdAt: -1 });
+taskSchema.index({ workspaceId: 1, projectId: 1, status: 1 });
+taskSchema.index({ workspaceId: 1, priority: 1 });
+taskSchema.index({ workspaceId: 1, projectId: 1, updatedAt: -1 });
 // Platform-wide creation/completion aggregations.
 taskSchema.index({ createdAt: -1 });
 taskSchema.index({ completedAt: -1 });

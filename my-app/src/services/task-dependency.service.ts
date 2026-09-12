@@ -204,15 +204,14 @@ async function buildGraph(
 ): Promise<DependencyGraphDTO> {
   await requireFlag("tasks", userId);
 
-  // Reuse repositories: they enforce workspace isolation via requireMembership
-  const { listTasks } = await import("@/src/repositories/task.repository");
-  const filter: Record<string, unknown> = {};
-  if (projectId) filter.projectId = projectId;
+  // Optimized for scale: select only needed fields, capped at 1000 nodes / 2000 edges, lean.
+  const { listTasksForGraph } = await import("@/src/repositories/task.repository");
+  const { listDependenciesForGraph } = await import("@/src/repositories/task-dependency.repository");
 
-  // Fetch tasks and dependencies in parallel (both workspace-isolated)
+  // Fetch tasks and dependencies in parallel — both workspace-isolated and indexed.
   const [tasks, deps] = await Promise.all([
-    listTasks(userId, workspaceId, filter as never),
-    listTaskDependencies(userId, workspaceId),
+    listTasksForGraph(userId, workspaceId, projectId ? { projectId } : {}),
+    listDependenciesForGraph(userId, workspaceId),
   ]);
 
   // Project graph: filter edges to those where both endpoints belong to project-scoped tasks

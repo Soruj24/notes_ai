@@ -17,6 +17,7 @@ interface Props {
   selectedEdgeId: string | null;
   onSelectNode: (id: string) => void;
   onSelectEdge: (id: string) => void;
+  phaseBy?: "level" | "status";
 }
 
 const NODE_W = 210;
@@ -24,7 +25,26 @@ const NODE_H = 74;
 const COL_GAP = 48;
 const ROW_GAP = 36;
 
-function autoLayout(nodes: Node[], edges: Edge[]) {
+function autoLayout(nodes: Node[], edges: Edge[], phaseBy: "level" | "status" = "level") {
+  if (phaseBy === "status") {
+    // Phase lanes: Todo | In Progress | Done
+    const phases: Record<string, number> = { todo: 0, in_progress: 1, done: 2 };
+    const byPhase = new Map<number, string[]>();
+    for (const n of nodes) {
+      const p = phases[n.status] ?? 0;
+      const arr = byPhase.get(p) ?? [];
+      arr.push(n.id);
+      byPhase.set(p, arr);
+    }
+    const pos = new Map<string, { x: number; y: number }>();
+    for (const [phase, ids] of byPhase) {
+      ids.forEach((id, idx) => {
+        pos.set(id, { x: phase * (NODE_W + COL_GAP + 24) + 24, y: idx * (NODE_H + 16) + 48 });
+      });
+    }
+    for (const n of nodes) if (!pos.has(n.id)) pos.set(n.id, { x: 24, y: 24 });
+    return pos;
+  }
   // Levels via longest path from sources (Kahn topo already implied by blocked graph)
   const indeg = new Map<string, number>();
   const adj = new Map<string, string[]>();
@@ -70,8 +90,8 @@ function autoLayout(nodes: Node[], edges: Edge[]) {
   return pos;
 }
 
-export function DependencyGraph({ nodes, edges, blocked, criticalPath, selectedNodeId, selectedEdgeId, onSelectNode, onSelectEdge }: Props) {
-  const pos = useMemo(() => autoLayout(nodes, edges), [nodes, edges]);
+export function DependencyGraph({ nodes, edges, blocked, criticalPath, selectedNodeId, selectedEdgeId, onSelectNode, onSelectEdge, phaseBy = "level" }: Props) {
+  const pos = useMemo(() => autoLayout(nodes, edges, phaseBy), [nodes, edges, phaseBy]);
   const containerRef = useRef<HTMLDivElement>(null);
   const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
   const [drag, setDrag] = useState<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
@@ -158,7 +178,7 @@ export function DependencyGraph({ nodes, edges, blocked, criticalPath, selectedN
       onMouseMove={onMouseMove}
       onMouseUp={onMouseUp}
       onMouseLeave={onMouseUp}
-      className="relative h-[520px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950"
+      className="relative h-[520px] overflow-hidden rounded-md border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
     >
       <div className="absolute left-2 top-2 z-10 flex gap-1">
         <GraphToolbar
@@ -181,6 +201,22 @@ export function DependencyGraph({ nodes, edges, blocked, criticalPath, selectedN
         style={{ transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`, transformOrigin: "0 0", transition: drag ? undefined : "transform 220ms ease-out" }}
         className="absolute left-0 top-0"
       >
+        {/* Phase lanes — when grouped by status */}
+        {phaseBy === "status" ? (
+          <div className="absolute left-0 top-0 flex h-full gap-0" style={{ width, height }}>
+            {[
+              { label: "To do", key: "todo" },
+              { label: "In Progress", key: "in_progress" },
+              { label: "Done", key: "done" },
+            ].map((lane) => (
+              <div key={lane.key} className="shrink-0 border-r border-dashed border-zinc-200 dark:border-zinc-800" style={{ width: NODE_W + COL_GAP + 24, height }}>
+                <div className="sticky top-0 bg-white/80 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500 backdrop-blur dark:bg-zinc-950/80 dark:text-zinc-400">
+                  {lane.label}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
         {/* edges under nodes */}
         <svg width={width} height={height} className="absolute left-0 top-0">
           <defs>

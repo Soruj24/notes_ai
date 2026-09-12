@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { SearchX } from "lucide-react";
 import { TaskEmptyState } from "@/src/components/tasks/TaskEmptyState";
 import { TaskListItem } from "@/src/components/tasks/TaskListItem";
@@ -13,6 +13,7 @@ import {
 } from "@/src/components/tasks/types";
 import { useAppDispatch, useAppSelector } from "@/src/store/hooks";
 import { useListTasksQuery } from "@/src/store/tasksApi";
+import { useGetDependencyGraphQuery } from "@/src/store/dependencyGraphApi";
 import { setTaskSearch } from "@/src/store/tasksUiSlice";
 
 interface TaskListProps {
@@ -31,15 +32,18 @@ export function TaskList({ wid, view, projectId, goalId, hideEmpty }: TaskListPr
   const dispatch = useAppDispatch();
   const sort = useAppSelector((s) => s.tasksUi.sort);
   const search = useAppSelector((s) => s.tasksUi.search);
+  const deferredSearch = useDeferredValue(search);
   const { data, isLoading, isError, refetch } = useListTasksQuery({
     wid,
     view,
     projectId,
     goalId,
   });
+  // Single graph fetch for 1000+ tasks — avoids per-item subscriptions
+  const { data: graph } = useGetDependencyGraphQuery({ workspaceId: wid });
 
   const visible = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = deferredSearch.trim().toLowerCase();
     const filtered = (data ?? []).filter(
       (t) =>
         !q ||
@@ -47,7 +51,15 @@ export function TaskList({ wid, view, projectId, goalId, hideEmpty }: TaskListPr
         (t.notes ?? "").toLowerCase().includes(q),
     );
     return sortTasks(filtered, sort);
-  }, [data, search, sort]);
+  }, [data, deferredSearch, sort]);
+
+  // Pagination for 100/500/1000+ tasks — avoids rendering all at once
+  const PAGE_SIZE = 50;
+  const [page, setPage] = useState(1);
+  useEffect(() => {
+    queueMicrotask(() => setPage(1));
+  }, [view, projectId, goalId, deferredSearch, sort]);
+  const paged = useMemo(() => visible.slice(0, page * PAGE_SIZE), [visible, page]);
 
   if (isLoading) return <TaskSkeleton />;
   if (isError) {
@@ -84,18 +96,25 @@ export function TaskList({ wid, view, projectId, goalId, hideEmpty }: TaskListPr
     return <TaskEmptyState view={view} />;
   }
   const total = data?.length ?? visible.length;
+  const hasMore = paged.length < visible.length;
   return (
     <div className="grid gap-2.5">
       <p aria-live="polite" className="text-xs text-zinc-400 tabular-nums dark:text-zinc-500">
-        {search.trim()
+        {deferredSearch.trim()
           ? `${visible.length} of ${total} shown`
           : `${visible.length} ${visible.length === 1 ? "task" : "tasks"}`}
+        {hasMore ? ` · showing ${paged.length}` : ""}
       </p>
       <ul className="grid gap-2">
-        {visible.map((task) => (
-          <TaskListItem key={task.id} wid={wid} task={task} />
+        {paged.map((task) => (
+          <TaskListItem key={task.id} wid={wid} task={task} graph={graph} />
         ))}
       </ul>
+      {hasMore ? (
+        <Button variant="outline" size="sm" onClick={() => setPage((p) => p + 1)} className="mx-auto">
+          Load more ({visible.length - paged.length} remaining)
+        </Button>
+      ) : null}
     </div>
   );
 }

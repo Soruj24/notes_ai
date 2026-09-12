@@ -51,6 +51,8 @@ taskDependencySchema.index({ workspaceId: 1, successorTaskId: 1 });
 taskDependencySchema.index({ workspaceId: 1, predecessorTaskId: 1 });
 taskDependencySchema.index({ workspaceId: 1, type: 1 });
 taskDependencySchema.index({ workspaceId: 1, createdAt: -1 });
+// Covering index for graph queries (workspace + edges) — avoids collection scan at 500+ edges
+taskDependencySchema.index({ workspaceId: 1, predecessorTaskId: 1, successorTaskId: 1, type: 1 });
 
 applyJsonTransform(taskDependencySchema);
 

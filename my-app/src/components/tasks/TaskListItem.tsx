@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { CalendarDays, Repeat } from "lucide-react";
 import { Badge } from "@/src/components/ui/badge";
 import { useToast } from "@/src/components/ui/toast";
@@ -33,28 +33,29 @@ const priorityDot: Record<string, string> = {
 interface TaskListItemProps {
   wid: string;
   task: TaskDTO;
+  /** Optional pre-fetched graph to avoid per-item subscription at scale (1000+ tasks). */
+  graph?: { blocked: Record<string, boolean>; blockedDetails: Record<string, string[]>; nodes: Array<{ id: string; title: string }> } | null;
 }
 
-/** Task row with instant local checkbox + RTK mutation behind it + blocked intelligence. */
-export function TaskListItem({ wid, task }: TaskListItemProps) {
+function TaskListItemInner({ wid, task, graph: graphProp }: TaskListItemProps) {
   const { toast } = useToast();
   const [completeTask] = useCompleteTaskMutation();
   const [reopenTask] = useReopenTaskMutation();
-  const { data: graph } = useGetDependencyGraphQuery({ workspaceId: wid });
+  const { data: graphQuery } = useGetDependencyGraphQuery({ workspaceId: wid }, { skip: !!graphProp });
+  const graph = graphProp ?? graphQuery ?? null;
   // Local mirror for instant feedback; server is source of truth on refetch.
   const [done, setDone] = useState(task.status === "done");
   const overdue = !done && isOverdue(task);
-  const progress = subtaskProgress(task);
-
-  // Real dependency data — never mock
+  const progress = useMemo(() => subtaskProgress(task), [task]);
+  // Real dependency data — never mock, memoized
   const blocked = useMemo(() => !!graph?.blocked[task.id], [graph, task.id]);
-  const blockedByIds: string[] = useMemo(() => graph?.blockedDetails[task.id] ?? [], [graph, task.id]);
+  const blockedByIds = useMemo(() => (graph?.blockedDetails[task.id] ?? []) as string[], [graph, task.id]);
   const blockedByNames = useMemo(() => {
     if (!graph) return [] as Array<{ id: string; title: string }>;
     const map = new Map(graph.nodes.map((n) => [n.id, n.title]));
     return blockedByIds.map((id) => ({ id, title: map.get(id) ?? id.slice(0, 8) }));
   }, [graph, blockedByIds]);
-  const intelligence = getTaskIntelligenceState(task, blocked);
+  const intelligence = useMemo(() => getTaskIntelligenceState(task, blocked), [task, blocked]);
 
   async function onToggle() {
     const next = !done;
@@ -74,7 +75,7 @@ export function TaskListItem({ wid, task }: TaskListItemProps) {
   return (
     <li
       className={cx(
-        "rounded-xl border bg-white transition-[border-color,box-shadow] hover:shadow-[0_4px_12px_-4px_rgb(0_0_0/0.12)] focus-within:border-indigo-400 dark:bg-zinc-950 dark:focus-within:border-indigo-400",
+        "rounded-xl border bg-white transition-[border-color,box-shadow,opacity] duration-200 hover:shadow-[0_4px_12px_-4px_rgb(0_0_0/0.12)] focus-within:border-indigo-400 dark:bg-zinc-950 dark:focus-within:border-indigo-400",
         overdue
           ? "border-red-300 hover:border-red-400 dark:border-red-900/70 dark:hover:border-red-800"
           : "border-zinc-200/90 hover:border-zinc-300 dark:border-zinc-800 dark:hover:border-zinc-700",
@@ -165,3 +166,5 @@ export function TaskListItem({ wid, task }: TaskListItemProps) {
     </li>
   );
 }
+
+export const TaskListItem = memo(TaskListItemInner);
